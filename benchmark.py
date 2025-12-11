@@ -2,9 +2,8 @@ import time
 import dominate
 from lxml import etree
 import sys
-sys.path.append("build/lib.macosx-14.5-arm64-cpython-312")
+sys.path.append("build/lib.macosx-26.0-arm64-cpython-313")
 import fasttag
-from fasttag import *
 import fasthtml.common
 import html
 import fast_html
@@ -32,7 +31,7 @@ assert_equal(fast_html.render(fast_html.div([html.escape("Hello &"), html.escape
 assert_equal("".join(["<div>", html.escape("Hello &"), html.escape(" world <3"), "</div>"]), "<div>Hello &amp; world &lt;3</div>")
 assert_equal(fasttag.Div("Hello &", "world <3").bytes(), b"<div>Hello &amp;world &lt;3</div>")
 assert_equal(str(dominate.tags.div("Hello &", "world <3")), "<div>Hello &amp;world &lt;3</div>")
-assert_equal(fasthtml.common.to_xml(fasthtml.common.Div("Hello &", "world <3")), "<div>\nHello &amp;\nworld &lt;3\n</div>\n")
+assert_equal(fasthtml.common.to_xml(fasthtml.common.Div("Hello &", "world <3")), "<div>\nHello &amp;world &lt;3</div>\n")
 assert_equal(lxml_text_div(), b'<div>Hello &amp; world &lt;3</div>')
 assert_equal(template.render(text="Hello &", text2="world <3"), "<div>Hello &amp; world &lt;3</div>")
 

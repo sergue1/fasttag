@@ -11,6 +11,9 @@
 typedef struct {
     PyObject_HEAD
     Py_ssize_t size;
+    char is_partial;  // 1 if this is a partial tag (callable), 0 if fully rendered
+    char* tag_name;   // Tag name for partial tags (NULL if not partial)
+    PyObject* kwargs; // Kwargs for partial tags (NULL if not partial)
     char data[];
 } HTMLObject;
 
@@ -18,10 +21,14 @@ typedef struct {
 static PyTypeObject HTML_Type;
 #define HTMLObject_Check(op) PyObject_TypeCheck(op, &HTML_Type)
 
+// Forward declarations
+static int is_self_closing_tag(const char *tag);
+
 // Method declarations
 static PyObject* HTML_new(PyTypeObject* type, PyObject* args, PyObject* kwds);
 static int HTML_init(HTMLObject* self, PyObject* args, PyObject* kwds);
 static void HTML_dealloc(HTMLObject* self);
+static PyObject* HTML_call(PyObject* self, PyObject* args, PyObject* kwargs);
 
 static PyObject* HTML_alloc(PyTypeObject* type, Py_ssize_t nitems) {
     // Allocate memory for the object plus space for the string data
@@ -42,6 +49,9 @@ PyObject* HTMLObjectFromStringAndSize(const char* data, Py_ssize_t size) {
     }
 
     obj->size = size;
+    obj->is_partial = 0;
+    obj->tag_name = NULL;
+    obj->kwargs = NULL;
     memcpy(obj->data, data, size);
     obj->data[size] = '\0';  // Null-terminate the string
     return (PyObject*)obj;
@@ -82,6 +92,9 @@ static PyObject* HTML_new(PyTypeObject* type, PyObject* args, PyObject* kwds) {
     self = (HTMLObject*)HTML_alloc(type, length + 1);
     if (self != NULL) {
         self->size = length;
+        self->is_partial = 0;
+        self->tag_name = NULL;
+        self->kwargs = NULL;
         memcpy(self->data, data, length);
         self->data[length] = '\0';  // Null-terminate the string
     }
@@ -94,6 +107,14 @@ static int HTML_init(HTMLObject* self, PyObject* args, PyObject* kwds) {
 }
 
 static void HTML_dealloc(HTMLObject* self) {
+    if (self->is_partial) {
+        if (self->tag_name) {
+            free(self->tag_name);
+        }
+        if (self->kwargs) {
+            Py_DECREF(self->kwargs);
+        }
+    }
     self->size = 0;
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -104,11 +125,45 @@ static PyObject* HTML_bytes(HTMLObject* self, PyObject* Py_UNUSED(ignored)) {
 
 static PyObject* HTML_str(PyObject* self) {
     HTMLObject* obj = (HTMLObject*)self;
+
+    // If this is a partial tag, render it first
+    if (obj->is_partial) {
+        // Pass None as a child to force rendering (will be ignored by append_item_to_html)
+        PyObject* args = PyTuple_New(1);
+        Py_INCREF(Py_None);
+        PyTuple_SetItem(args, 0, Py_None);
+        PyObject* rendered = HTML_call(self, args, NULL);
+        Py_DECREF(args);
+        if (!rendered) {
+            return NULL;
+        }
+        PyObject* result = HTML_str(rendered);
+        Py_DECREF(rendered);
+        return result;
+    }
+
     return PyUnicode_FromStringAndSize(obj->data, obj->size);
 }
 
 static PyObject* HTML_repr(PyObject* self) {
     HTMLObject* obj = (HTMLObject*)self;
+
+    // If this is a partial tag, render it first
+    if (obj->is_partial) {
+        // Pass None as a child to force rendering (will be ignored by append_item_to_html)
+        PyObject* args = PyTuple_New(1);
+        Py_INCREF(Py_None);
+        PyTuple_SetItem(args, 0, Py_None);
+        PyObject* rendered = HTML_call(self, args, NULL);
+        Py_DECREF(args);
+        if (!rendered) {
+            return NULL;
+        }
+        PyObject* result = HTML_repr(rendered);
+        Py_DECREF(rendered);
+        return result;
+    }
+
     return PyUnicode_FromFormat("<fasttag.HTML>%s</fasttag.HTML>", obj->data);
 }
 
@@ -132,6 +187,9 @@ static PyObject* HTML_add(PyObject* left, PyObject* right) {
     memcpy(result->data + left_obj->size, right_obj->data, right_obj->size);
     result->data[new_length] = '\0';
     result->size = new_length;
+    result->is_partial = 0;
+    result->tag_name = NULL;
+    result->kwargs = NULL;
     return (PyObject*)result;
 }
 
@@ -143,21 +201,65 @@ static PyObject* HTML_richcompare(PyObject* a, PyObject* b, int op) {
     HTMLObject* a_obj = (HTMLObject*)a;
     HTMLObject* b_obj = (HTMLObject*)b;
 
-    if (op == Py_EQ) {
-        if (a_obj->size == b_obj->size && strcmp(a_obj->data, b_obj->data) == 0) {
-            Py_RETURN_TRUE;
-        } else {
-            Py_RETURN_FALSE;
+    // If either is a partial tag, render it first
+    PyObject* a_rendered = a;
+    PyObject* b_rendered = b;
+    int a_needs_free = 0;
+    int b_needs_free = 0;
+
+    if (a_obj->is_partial) {
+        // Pass None as a child to force rendering (will be ignored by append_item_to_html)
+        PyObject* args = PyTuple_New(1);
+        Py_INCREF(Py_None);
+        PyTuple_SetItem(args, 0, Py_None);
+        a_rendered = HTML_call(a, args, NULL);
+        Py_DECREF(args);
+        if (!a_rendered) {
+            return NULL;
         }
-    } else if (op == Py_NE) {
-        if (a_obj->size == b_obj->size && strcmp(a_obj->data, b_obj->data) == 0) {
-            Py_RETURN_FALSE;
-        } else {
-            Py_RETURN_TRUE;
-        }
+        a_obj = (HTMLObject*)a_rendered;
+        a_needs_free = 1;
     }
 
-    Py_RETURN_NOTIMPLEMENTED;
+    if (b_obj->is_partial) {
+        // Pass None as a child to force rendering (will be ignored by append_item_to_html)
+        PyObject* args = PyTuple_New(1);
+        Py_INCREF(Py_None);
+        PyTuple_SetItem(args, 0, Py_None);
+        b_rendered = HTML_call(b, args, NULL);
+        Py_DECREF(args);
+        if (!b_rendered) {
+            if (a_needs_free) Py_DECREF(a_rendered);
+            return NULL;
+        }
+        b_obj = (HTMLObject*)b_rendered;
+        b_needs_free = 1;
+    }
+
+    PyObject* result;
+    if (op == Py_EQ) {
+        if (a_obj->size == b_obj->size && strcmp(a_obj->data, b_obj->data) == 0) {
+            result = Py_True;
+        } else {
+            result = Py_False;
+        }
+        Py_INCREF(result);
+    } else if (op == Py_NE) {
+        if (a_obj->size == b_obj->size && strcmp(a_obj->data, b_obj->data) == 0) {
+            result = Py_False;
+        } else {
+            result = Py_True;
+        }
+        Py_INCREF(result);
+    } else {
+        result = Py_NotImplemented;
+        Py_INCREF(result);
+    }
+
+    if (a_needs_free) Py_DECREF(a_rendered);
+    if (b_needs_free) Py_DECREF(b_rendered);
+
+    return result;
 }
 
 
@@ -228,10 +330,11 @@ static PyObject * HTML_get_attrs(HTMLObject *self) {
         }
         // Find the value
         char *end = unescaped;
-        if (*tag == '"') {
+        if (*tag == '\'' || *tag == '"') {
+            char quote_char = *tag;
             tag++;
             // unescape value
-            while (*tag != '"' && *tag != '\0') {
+            while (*tag != quote_char && *tag != '\0') {
                 if (*tag == '&') {
                     if (tag[1] == 'l' && tag[2] == 't' && tag[3] == ';') {
                         *end++ = '<';
@@ -239,6 +342,12 @@ static PyObject * HTML_get_attrs(HTMLObject *self) {
                     } else if (tag[1] == 'a' && tag[2] == 'm' && tag[3] == 'p' && tag[4] == ';') {
                         *end++ = '&';
                         tag += 5;
+                    } else if (tag[1] == '#' && tag[2] == '3' && tag[3] == '9' && tag[4] == ';') {
+                        *end++ = '\'';
+                        tag += 5;
+                    } else if (tag[1] == 'q' && tag[2] == 'u' && tag[3] == 'o' && tag[4] == 't' && tag[5] == ';') {
+                        *end++ = '"';
+                        tag += 6;
                     } else {
                         *end++ = *tag++;
                     }
@@ -365,6 +474,7 @@ static PyTypeObject HTML_Type = {
     .tp_as_number = &HTML_as_number,
     .tp_richcompare = HTML_richcompare,
     .tp_getset = HTML_getsetters,
+    .tp_call = HTML_call,
 };
 
 int indent = 2;
@@ -478,9 +588,12 @@ void append_bytes(int* l, const char* item, int size, int indent, int *reserved,
     }
 }
 
-void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent, int i,
+void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent, char disable_escaping, int i,
      HTMLObject** result_obj, int *reserved, char** result)
 {
+    if (item == Py_None) {
+        return;
+    }
     if (PyUnicode_Check(item)) {
         if (indent < 0 && i > 1) {
             (*result)[(*l)++] = ' ';
@@ -492,7 +605,23 @@ void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent
             return;
         }
 
-        if (indent > 0 && !disable_indent) {
+        if (disable_escaping) {
+            // For script/style tags: no escaping, handle indentation
+            if (indent > 0 && !disable_indent) {
+                for (int j = 0; item_str[j] != '\0'; j++) {
+                    (*result)[(*l)++] = item_str[j];
+                    if (item_str[j] == '\n') {
+                        for (int k = 0; k < indent; k++) {
+                            (*result)[(*l)++] = ' ';
+                        }
+                    }
+                }
+            } else {
+                for (int j = 0; item_str[j] != '\0'; j++) {
+                    (*result)[(*l)++] = item_str[j];
+                }
+            }
+        } else if (indent > 0 && !disable_indent) {
             for (int j = 0; item_str[j] != '\0'; j++) {
                 if (item_str[j] == '<') {
                     (*result)[(*l)++] = '&';
@@ -540,6 +669,23 @@ void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent
             size = PyBytes_Size(item);
         } else {
             HTMLObject* html_obj = (HTMLObject*)item;
+
+            // If this is a partial tag, render it first
+            if (html_obj->is_partial) {
+                PyObject* args = PyTuple_New(1);
+                Py_INCREF(Py_None);
+                PyTuple_SetItem(args, 0, Py_None);
+                PyObject* rendered = HTML_call(item, args, NULL);
+                Py_DECREF(args);
+                if (!rendered) {
+                    return;
+                }
+                // Recursively append the rendered content
+                append_item_to_html(l, rendered, indent, disable_indent, disable_escaping, i, result_obj, reserved, result);
+                Py_DECREF(rendered);
+                return;
+            }
+
             item_str = html_obj->data;
             size = html_obj->size;
         }
@@ -569,9 +715,14 @@ void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent
     } else if (PyTuple_Check(item)) {
         Py_ssize_t num_args = PyTuple_Size(item);
         for (Py_ssize_t j = 0; j < num_args; j++) {
-            (*result)[(*l)++] = '\n';
             PyObject* subitem = PyTuple_GetItem(item, j);
-            append_item_to_html(l, subitem, indent, disable_indent, i, result_obj, reserved, result);
+            if (subitem == Py_None) {
+                continue;
+            }
+            if (!PyTuple_Check(item)) {
+                (*result)[(*l)++] = '\n';
+            }
+            append_item_to_html(l, subitem, indent, disable_indent, disable_escaping, i, result_obj, reserved, result);
             if (!*result_obj) {
                 return;
             }
@@ -593,7 +744,7 @@ void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent
         if (!ft) {
             return;
         }
-        append_item_to_html(l, ft, indent, disable_indent, i, result_obj, reserved, result);
+        append_item_to_html(l, ft, indent, disable_indent, disable_escaping, i, result_obj, reserved, result);
         Py_DECREF(ft);
     
     } else {
@@ -601,9 +752,47 @@ void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent
         if (!item) {
             return;
         }
-        append_item_to_html(l, item, indent, disable_indent, i, result_obj, reserved, result);
+        append_item_to_html(l, item, indent, disable_indent, disable_escaping, i, result_obj, reserved, result);
         Py_DECREF(item);
     }
+}
+
+// Forward declaration
+static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_first, PyObject* kwargs);
+
+// Implement __call__ for HTML objects (for partial tags)
+static PyObject* HTML_call(PyObject* self, PyObject* args, PyObject* kwargs) {
+    HTMLObject* html_obj = (HTMLObject*)self;
+
+    // Check if this is a partial tag
+    if (!html_obj->is_partial) {
+        PyErr_SetString(PyExc_TypeError, "Cannot call a fully rendered HTML object. Only partial tags (created with attributes but no children) are callable.");
+        return NULL;
+    }
+
+    // Check if tag is self-closing
+    if (is_self_closing_tag(html_obj->tag_name)) {
+        PyErr_Format(PyExc_TypeError, "Cannot call self-closing tag '%s'. Self-closing tags cannot have children.", html_obj->tag_name);
+        return NULL;
+    }
+
+    // Merge kwargs
+    PyObject* merged_kwargs = PyDict_Copy(html_obj->kwargs);
+    if (!merged_kwargs) {
+        return NULL;
+    }
+
+    if (kwargs) {
+        if (PyDict_Update(merged_kwargs, kwargs) < 0) {
+            Py_DECREF(merged_kwargs);
+            return NULL;
+        }
+    }
+
+    // Call the tag implementation with merged args and kwargs
+    PyObject* result = fasttag_tag_impl(html_obj->tag_name, args, 0, merged_kwargs);
+    Py_DECREF(merged_kwargs);
+    return result;
 }
 
 static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_first, PyObject* kwargs) {
@@ -617,6 +806,35 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
         PyErr_SetString(PyExc_TypeError, "At least one argument is required (tag)");
         return NULL;
     }
+
+    // Check if we should create a partial tag
+    // Condition: no positional children args, has kwargs, and not self-closing
+    Py_ssize_t num_children = num_args - (skip_first ? 1 : 0);
+    if (num_children == 0 && kwargs && PyDict_Size(kwargs) > 0 && !is_self_closing_tag(tag)) {
+        // Create a partial tag
+        HTMLObject *partial_obj = (HTMLObject*)HTML_alloc(&HTML_Type, 1);
+        if (!partial_obj) {
+            return PyErr_NoMemory();
+        }
+
+        partial_obj->size = 0;
+        partial_obj->data[0] = '\0';
+        partial_obj->is_partial = 1;
+
+        // Store tag name
+        partial_obj->tag_name = strdup(tag);
+        if (!partial_obj->tag_name) {
+            Py_DECREF(partial_obj);
+            return PyErr_NoMemory();
+        }
+
+        // Store kwargs (increment refcount)
+        partial_obj->kwargs = kwargs;
+        Py_INCREF(kwargs);
+
+        return (PyObject*)partial_obj;
+    }
+
     int inner_text_multiplier = (indent >= 0) ? (indent + 1) : 1;
 
     // Allocate memory for the new string
@@ -653,6 +871,10 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
             if (PyBool_Check(value) && value == Py_False) {
                 continue;
             }
+            // skip None value
+            if (value == Py_None) {
+                continue;
+            }
 
             result[l++] = ' ';
             const char *key_str = PyUnicode_AsUTF8(key);
@@ -661,7 +883,14 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
                 return NULL;
             }
 
-            if (key_str[0] == '_') {
+            // Handle 'cls' as a synonym for 'class'
+            if (strcmp(key_str, "cls") == 0) {
+                result[l++] = 'c';
+                result[l++] = 'l';
+                result[l++] = 'a';
+                result[l++] = 's';
+                result[l++] = 's';
+            } else if (key_str[0] == '_') {
                 if (key_str[1] != '\0') {
                     key_str++;
                 }
@@ -681,10 +910,11 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
             if (PyBool_Check(value)) {
                 continue;
             }
-            
+
             result[l++] = '=';
-            result[l++] = '"';
+
             if (PyLong_Check(value)) {
+                result[l++] = '"';
                 long long_value = PyLong_AsLong(value);
                 char long_str[20];
                 sprintf(long_str, "%ld", long_value);
@@ -692,7 +922,9 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
                 while (*long_strp) {
                     result[l++] = *(long_strp++);
                 }
+                result[l++] = '"';
             } else if (PyFloat_Check(value)) {
+                result[l++] = '"';
                 double double_value = PyFloat_AsDouble(value);
                 char double_str[20];
                 sprintf(double_str, "%g", double_value);
@@ -700,7 +932,24 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
                 while (*double_strp) {
                     result[l++] = *(double_strp++);
                 }
+                result[l++] = '"';
+            } else if (HTMLObject_Check(value)) {
+                // If value is HTML object, use single quotes and no escaping (for JSON)
+                result[l++] = '\'';
+                HTMLObject* html_obj = (HTMLObject*)value;
+                const char *value_str = html_obj->data;
+                int size = html_obj->size;
+                reserve(size + l + extra, &result_obj, &reserved, &result);
+                if (!result_obj) {
+                    return NULL;
+                }
+                for (int j = 0; j < size; j++) {
+                    result[l++] = value_str[j];
+                }
+                result[l++] = '\'';
             } else {
+                // Regular string: use double quotes and escape " and &
+                result[l++] = '"';
                 // convert to string if necessary
                 int converted = 0;
                 if (!PyUnicode_Check(value)) {
@@ -738,19 +987,23 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
                 if (converted) {
                     Py_DECREF(value);
                 }
+                result[l++] = '"';
             }
-            result[l++] = '"';
         }
     }
     
     result[l++] = '>';
 
-    char disable_indent = (skip_first ? 1 : 0) + 1 == num_args;
+    // Determine whether to disable indentation for children
+    char disable_indent = 0;
 
-    if (disable_indent) {
-        // Check that there is no newline
+    if ((skip_first ? 1 : 0) + 1 == num_args) {
+        // Exactly one child - check if it should be inlined
         PyObject* item = PyTuple_GetItem(args, skip_first ? 1 : 0);
+        disable_indent = 1;  // Default to inline for single child
+
         if (PyUnicode_Check(item)) {
+            // For strings, only inline if no newlines
             const char *item_str = PyUnicode_AsUTF8(item);
             for (int j = 0; item_str[j] != '\0'; j++) {
                 if (item_str[j] == '\n') {
@@ -759,10 +1012,11 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
                 }
             }
         } else if (PyBytes_Check(item) || HTMLObject_Check(item)) {
+            // For bytes/HTML, don't inline
             disable_indent = 0;
         }
-    }
-    if((skip_first ? 1 : 0) == num_args) {
+    } else if ((skip_first ? 1 : 0) == num_args) {
+        // No children - inline the empty tag
         disable_indent = 1;
     }
 
@@ -770,15 +1024,24 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
         disable_indent = 1;
     }
 
+    // Determine whether to disable HTML escaping for children
+    char disable_escaping = 0;
+    if (!strcmp(tag, "script") || !strcmp(tag, "style")) {
+        disable_escaping = 1;
+    }
+
     for (Py_ssize_t i = (skip_first ? 1 : 0); i < num_args; i++) {
+        PyObject* item = PyTuple_GetItem(args, i);
+        if (item == Py_None) {
+            continue;
+        }
         if (indent >= 0 && !disable_indent) {
             result[l++] = '\n';
             for (int j = 0; j < indent; j++) {
                 result[l++] = ' ';
             }
         }
-        PyObject* item = PyTuple_GetItem(args, i);
-        append_item_to_html(&l, item, indent, disable_indent, i, &result_obj, &reserved, &result);
+        append_item_to_html(&l, item, indent, disable_indent, disable_escaping, i, &result_obj, &reserved, &result);
         if (!result_obj) {
             return NULL;
         }
@@ -798,6 +1061,9 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
     }
     result_obj->size = l;
     result[l] = '\0';
+    result_obj->is_partial = 0;
+    result_obj->tag_name = NULL;
+    result_obj->kwargs = NULL;
     result_obj = HTMLObjectShrink(result_obj, l);
 
     return (PyObject *)result_obj;
@@ -843,6 +1109,9 @@ static PyObject* fasttag_text(PyObject* self, PyObject* args) {
     }
     result_obj->size = l;
     result[l] = '\0';
+    result_obj->is_partial = 0;
+    result_obj->tag_name = NULL;
+    result_obj->kwargs = NULL;
     result_obj = HTMLObjectShrink(result_obj, l);
     return (PyObject *)result_obj;
 }
@@ -1184,14 +1453,14 @@ static PyMethodDef fasttagMethods[] = {
 // Module definition
 static struct PyModuleDef fasttag = {
     PyModuleDef_HEAD_INIT,
-    "fasttag", // Module name
+    "_fasttag", // Module name
     NULL, // Module documentation
     -1, // Size of per-interpreter state of the module, or -1 if the module keeps state in global variables.
     fasttagMethods
 };
 
 // Module initialization function
-PyMODINIT_FUNC PyInit_fasttag(void) {
+PyMODINIT_FUNC PyInit__fasttag(void) {
     if (PyType_Ready(&HTML_Type) < 0) {
         printf("html type ready error\n");
         return NULL;

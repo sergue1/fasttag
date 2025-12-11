@@ -1,11 +1,12 @@
 from setuptools import setup, Extension
 
-module = Extension('fasttag', sources=['fasttag/fasttag.c'])
+module = Extension('fasttag._fasttag', sources=['fasttag/fasttag.c'])
 
 setup(
     name='fasttag',
     version='0.1.6',
     description='Extremely fast HTML tag generator',
+    packages=['fasttag'],
     ext_modules=[module],
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',

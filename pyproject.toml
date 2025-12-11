@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.cibuildwheel]
+# Build for Python 3.9 through 3.13
+#build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+build = "cp313-*"
+
+# Skip 32-bit builds and musl (Alpine Linux)
+skip = "*-win32 *-manylinux_i686 *-musllinux_*"
+
+# Use manylinux2014 (compatible with most Linux distros from ~2014+)
+manylinux-x86_64-image = "manylinux2014"
+manylinux-aarch64-image = "manylinux2014"
+
+# Test that the wheel works
+test-command = "python -c 'import fasttag; print(\"fasttag imported successfully\")'"
+
+# Build for x86_64 architecture (add aarch64 if you need ARM support)
+archs = ["x86_64"]
+
+[tool.cibuildwheel.linux]
+# Ensure we repair wheels to add manylinux tags
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
