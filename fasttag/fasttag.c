@@ -757,6 +757,52 @@ void append_item_to_html(int* l, PyObject* item, int indent, char disable_indent
     }
 }
 
+static void classify_child_item(PyObject* item, int* has_text_child, int* has_markup_child, int* has_multiline_text) {
+    if (item == Py_None) {
+        return;
+    }
+
+    if (PyTuple_Check(item)) {
+        Py_ssize_t num_items = PyTuple_Size(item);
+        for (Py_ssize_t j = 0; j < num_items; j++) {
+            classify_child_item(PyTuple_GetItem(item, j), has_text_child, has_markup_child, has_multiline_text);
+        }
+        return;
+    }
+
+    if (PyUnicode_Check(item)) {
+        *has_text_child = 1;
+        const char *item_str = PyUnicode_AsUTF8(item);
+        if (item_str && strchr(item_str, '\n')) {
+            *has_multiline_text = 1;
+        }
+        return;
+    }
+
+    if (PyBytes_Check(item)) {
+        *has_text_child = 1;
+        const char *item_bytes = PyBytes_AsString(item);
+        Py_ssize_t size = PyBytes_Size(item);
+        if (item_bytes && memchr(item_bytes, '\n', size)) {
+            *has_multiline_text = 1;
+        }
+        return;
+    }
+
+    if (PyLong_Check(item) || PyFloat_Check(item)) {
+        *has_text_child = 1;
+        return;
+    }
+
+    if (HTMLObject_Check(item)) {
+        *has_markup_child = 1;
+        return;
+    }
+
+    // Unknown objects are rendered via str(), which behaves as text content.
+    *has_text_child = 1;
+}
+
 // Forward declaration
 static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_first, PyObject* kwargs);
 
@@ -1018,6 +1064,20 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
     } else if ((skip_first ? 1 : 0) == num_args) {
         // No children - inline the empty tag
         disable_indent = 1;
+    } else {
+        int has_text_child = 0;
+        int has_markup_child = 0;
+        int has_multiline_text = 0;
+
+        // Mixed inline content (tags + text) should stay on one line to avoid
+        // introducing whitespace-only text nodes between elements.
+        for (Py_ssize_t i = (skip_first ? 1 : 0); i < num_args; i++) {
+            classify_child_item(PyTuple_GetItem(args, i), &has_text_child, &has_markup_child, &has_multiline_text);
+        }
+
+        if (has_text_child && has_markup_child && !has_multiline_text) {
+            disable_indent = 1;
+        }
     }
 
     if (!strcmp(tag, "pre")) {

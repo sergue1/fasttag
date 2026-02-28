@@ -4,7 +4,7 @@ module = Extension('fasttag._fasttag', sources=['fasttag/fasttag.c'])
 
 setup(
     name='fasttag',
-    version='0.1.6',
+    version='0.1.7',
     description='Extremely fast HTML tag generator',
     packages=['fasttag'],
     ext_modules=[module],
@@ -25,4 +25,4 @@ setup(
 # python setup.py sdist bdist_wheel
 # python -m twine upload dist/* --verbose
 
-# vx cibuildwheel --platform linux --output-dir dist
+# uvx cibuildwheel --platform linux --output-dir dist

@@ -21,7 +21,7 @@ Div( # HTML Tags are exported in fasttag, but fasttag.tag("div", ...) can be use
     # Label("First Name") returns the HTML as a bytes (which is not escaped, just indented), but all passed strings in the element children and attribute values are escaped
     Div(Label("First Name"), ": Joe"),
     Div(Label("Last Name"), ": Blow"),
-    Div(Label("Email"), ": joe@blow.com")
+    Div(Label("Email"), ": joe@blow.com"),
     # if a keyword starts with _, the first _ is ignored and the rest is used as an argument unchanged.
     Button("Click To Edit", hx_get="/contact/1/edit", _class="btn primary"),   
     # If the keyword argument doesn't start with _, underscores are converted to hypens (-) in the attibute name
@@ -32,19 +32,10 @@ Div( # HTML Tags are exported in fasttag, but fasttag.tag("div", ...) can be use
 
 ```HTML
 <div hx-target="this" hx-swap="outerHTML">
-<div>
-    <label>First Name</label>
-    : Joe
-</div>
-<div>
-    <label>Last Name</label>
-    : Blow
-</div>
-<div>
-    <label>Email</label>
-    : joe@blow.com
-</div>
-<button hx-get="/contact/1/edit" class="btn primary">Click To Edit</button>
+    <div><label>First Name</label>: Joe</div>
+    <div><label>Last Name</label>: Blow</div>
+    <div><label>Email</label>: joe@blow.com</div>
+    <button hx-get="/contact/1/edit" class="btn primary">Click To Edit</button>
 </div>
 ```
 
