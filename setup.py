@@ -26,3 +26,4 @@ setup(
 # python -m twine upload dist/* --verbose
 
 # uvx cibuildwheel --platform linux --output-dir dist
+# uvx cibuildwheel --platform linux --output-dir dist --archs aarch64
