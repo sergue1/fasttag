@@ -146,6 +146,5 @@ Also when returning data inside a handler, use ```.bytes()``` to convert it into
 Some missing features:
 - Large table benchmarks with headers
 - Comformance test vs FastHTML
-- svg namespace
 - parsing: attrs should get attributes
 - parsing: children should extract children from text

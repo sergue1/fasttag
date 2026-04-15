@@ -4,7 +4,6 @@
 
 // TODO: simpler memory management: malloc 32k buffer, realloc if needed
 // TODO: object
-// TODO: SVG namespace
 // Right now: benchmark: 0.18ms
 
 // Define the structure for the custom type
@@ -943,14 +942,20 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
                 while (*key_str) {
                     result[l++] = *(key_str++);
                 }
-            } else {  // transform _ to -
+            } else {  // transform _ to - and __ to :
                 while (*key_str) {
                     if (*key_str == '_') {
-                        result[l++] = '-';
+                        if (*(key_str + 1) == '_') {
+                            result[l++] = ':';
+                            key_str += 2;
+                        } else {
+                            result[l++] = '-';
+                            key_str++;
+                        }
                     } else {
                         result[l++] = *key_str;
+                        key_str++;
                     }
-                    key_str++;
                 }
             }
             if (PyBool_Check(value)) {
@@ -1355,7 +1360,74 @@ TAG_IMPL(strike);
 TAG_IMPL(tt);
 TAG_IMPL(xmp);
 
+// SVG tags (lowercase)
+TAG_IMPL(svg)
+TAG_IMPL(circle)
+TAG_IMPL(ellipse)
+TAG_IMPL(line)
+TAG_IMPL(path)
+TAG_IMPL(polygon)
+TAG_IMPL(polyline)
+TAG_IMPL(rect)
+TAG_IMPL(g)
+TAG_IMPL(defs)
+TAG_IMPL(symbol)
+TAG_IMPL(use)
+TAG_IMPL(tspan)
+TAG_IMPL(stop)
+TAG_IMPL(marker)
+TAG_IMPL(pattern)
+TAG_IMPL(mask)
+TAG_IMPL(filter)
+TAG_IMPL(view)
+TAG_IMPL(animate)
+TAG_IMPL(mpath)
+
+// SVG text element (name conflicts with existing fasttag_text helper)
+static PyObject* fasttag_svgtext(PyObject* self, PyObject* args, PyObject* kwargs) {
+    return fasttag_tag_impl("text", args, 0, kwargs);
+}
+
+// SVG camelCase tag macro
+#define SVG_TAG_IMPL(fname, tagname) \
+    static PyObject* fasttag_##fname(PyObject* self, PyObject* args, PyObject* kwargs) { \
+        return fasttag_tag_impl(tagname, args, 0, kwargs); \
+    }
+
+// SVG camelCase tags
+SVG_TAG_IMPL(linearGradient, "linearGradient")
+SVG_TAG_IMPL(radialGradient, "radialGradient")
+SVG_TAG_IMPL(clipPath, "clipPath")
+SVG_TAG_IMPL(foreignObject, "foreignObject")
+SVG_TAG_IMPL(animateMotion, "animateMotion")
+SVG_TAG_IMPL(animateTransform, "animateTransform")
+SVG_TAG_IMPL(feBlend, "feBlend")
+SVG_TAG_IMPL(feColorMatrix, "feColorMatrix")
+SVG_TAG_IMPL(feComponentTransfer, "feComponentTransfer")
+SVG_TAG_IMPL(feComposite, "feComposite")
+SVG_TAG_IMPL(feConvolveMatrix, "feConvolveMatrix")
+SVG_TAG_IMPL(feDiffuseLighting, "feDiffuseLighting")
+SVG_TAG_IMPL(feDisplacementMap, "feDisplacementMap")
+SVG_TAG_IMPL(feDropShadow, "feDropShadow")
+SVG_TAG_IMPL(feFlood, "feFlood")
+SVG_TAG_IMPL(feFuncA, "feFuncA")
+SVG_TAG_IMPL(feFuncB, "feFuncB")
+SVG_TAG_IMPL(feFuncG, "feFuncG")
+SVG_TAG_IMPL(feFuncR, "feFuncR")
+SVG_TAG_IMPL(feGaussianBlur, "feGaussianBlur")
+SVG_TAG_IMPL(feImage, "feImage")
+SVG_TAG_IMPL(feMerge, "feMerge")
+SVG_TAG_IMPL(feMergeNode, "feMergeNode")
+SVG_TAG_IMPL(feMorphology, "feMorphology")
+SVG_TAG_IMPL(feOffset, "feOffset")
+SVG_TAG_IMPL(fePointLight, "fePointLight")
+SVG_TAG_IMPL(feSpecularLighting, "feSpecularLighting")
+SVG_TAG_IMPL(feSpotLight, "feSpotLight")
+SVG_TAG_IMPL(feTile, "feTile")
+SVG_TAG_IMPL(feTurbulence, "feTurbulence")
+
 #define TAG_METHOD(Tag, tag) {#Tag, (PyCFunction)fasttag_##tag, METH_VARARGS | METH_KEYWORDS, #Tag},
+#define SVG_TAG_METHOD(PyName, fname) {PyName, (PyCFunction)fasttag_##fname, METH_VARARGS | METH_KEYWORDS, PyName},
 
 // Method definition object
 static PyMethodDef fasttagMethods[] = {
@@ -1506,6 +1578,60 @@ static PyMethodDef fasttagMethods[] = {
     TAG_METHOD(Strike, strike)
     TAG_METHOD(Tt, tt)
     TAG_METHOD(Xmp, xmp)
+
+    // SVG tags
+    TAG_METHOD(Svg, svg)
+    TAG_METHOD(Circle, circle)
+    TAG_METHOD(Ellipse, ellipse)
+    TAG_METHOD(Line, line)
+    TAG_METHOD(Path, path)
+    TAG_METHOD(Polygon, polygon)
+    TAG_METHOD(Polyline, polyline)
+    TAG_METHOD(Rect, rect)
+    TAG_METHOD(G, g)
+    TAG_METHOD(Defs, defs)
+    TAG_METHOD(Symbol, symbol)
+    TAG_METHOD(Use, use)
+    TAG_METHOD(Tspan, tspan)
+    TAG_METHOD(Stop, stop)
+    TAG_METHOD(Marker, marker)
+    TAG_METHOD(Pattern, pattern)
+    TAG_METHOD(Mask, mask)
+    TAG_METHOD(Filter, filter)
+    TAG_METHOD(View, view)
+    TAG_METHOD(Animate, animate)
+    TAG_METHOD(Mpath, mpath)
+    SVG_TAG_METHOD("SvgText", svgtext)
+    SVG_TAG_METHOD("LinearGradient", linearGradient)
+    SVG_TAG_METHOD("RadialGradient", radialGradient)
+    SVG_TAG_METHOD("ClipPath", clipPath)
+    SVG_TAG_METHOD("ForeignObject", foreignObject)
+    SVG_TAG_METHOD("AnimateMotion", animateMotion)
+    SVG_TAG_METHOD("AnimateTransform", animateTransform)
+    SVG_TAG_METHOD("FeBlend", feBlend)
+    SVG_TAG_METHOD("FeColorMatrix", feColorMatrix)
+    SVG_TAG_METHOD("FeComponentTransfer", feComponentTransfer)
+    SVG_TAG_METHOD("FeComposite", feComposite)
+    SVG_TAG_METHOD("FeConvolveMatrix", feConvolveMatrix)
+    SVG_TAG_METHOD("FeDiffuseLighting", feDiffuseLighting)
+    SVG_TAG_METHOD("FeDisplacementMap", feDisplacementMap)
+    SVG_TAG_METHOD("FeDropShadow", feDropShadow)
+    SVG_TAG_METHOD("FeFlood", feFlood)
+    SVG_TAG_METHOD("FeFuncA", feFuncA)
+    SVG_TAG_METHOD("FeFuncB", feFuncB)
+    SVG_TAG_METHOD("FeFuncG", feFuncG)
+    SVG_TAG_METHOD("FeFuncR", feFuncR)
+    SVG_TAG_METHOD("FeGaussianBlur", feGaussianBlur)
+    SVG_TAG_METHOD("FeImage", feImage)
+    SVG_TAG_METHOD("FeMerge", feMerge)
+    SVG_TAG_METHOD("FeMergeNode", feMergeNode)
+    SVG_TAG_METHOD("FeMorphology", feMorphology)
+    SVG_TAG_METHOD("FeOffset", feOffset)
+    SVG_TAG_METHOD("FePointLight", fePointLight)
+    SVG_TAG_METHOD("FeSpecularLighting", feSpecularLighting)
+    SVG_TAG_METHOD("FeSpotLight", feSpotLight)
+    SVG_TAG_METHOD("FeTile", feTile)
+    SVG_TAG_METHOD("FeTurbulence", feTurbulence)
 
     {NULL, NULL, 0, NULL} // Sentinel
 };

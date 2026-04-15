@@ -127,3 +127,30 @@ assert_equal(Div(cls="outer")(Span("inner"), id="wrapper"), Div(Span("inner"), c
 assert_equal(Div(cls="empty")(), Div(cls="empty"))
 assert_equal(Div(cls="empty")(), Div(cls="empty"))
 print("Callable syntax tests passed! ✓")
+
+# Test SVG namespace support
+print("Testing SVG namespace support...")
+fasttag.set_indent(-1)
+
+# __ -> : in attribute names (namespace separator)
+assert_equal(tag("use", xlink__href="#icon"), HTML('<use xlink:href="#icon"></use>'))
+assert_equal(tag("svg", xmlns__xlink="http://www.w3.org/1999/xlink"), HTML('<svg xmlns:xlink="http://www.w3.org/1999/xlink"></svg>'))
+assert_equal(tag("text", xml__space="preserve"), HTML('<text xml:space="preserve"></text>'))
+
+# SVG element tags
+assert_equal(Circle(cx="50", cy="50", r="40"), HTML('<circle cx="50" cy="50" r="40"></circle>'))
+assert_equal(Rect(width="100", height="100", fill="blue"), HTML('<rect width="100" height="100" fill="blue"></rect>'))
+assert_equal(Path(d="M 0 0 L 100 100"), HTML('<path d="M 0 0 L 100 100"></path>'))
+assert_equal(Line(x1="0", y1="0", x2="100", y2="100"), HTML('<line x1="0" y1="0" x2="100" y2="100"></line>'))
+assert_equal(G(Circle(r="10"), id="group"), HTML('<g id="group"><circle r="10"></circle></g>'))
+assert_equal(SvgText("Hello", x="10", y="20"), HTML('<text x="10" y="20">Hello</text>'))
+assert_equal(LinearGradient(id="grad"), HTML('<linearGradient id="grad"></linearGradient>'))
+assert_equal(ClipPath(id="clip"), HTML('<clipPath id="clip"></clipPath>'))
+assert_equal(ForeignObject(width="100", height="100"), HTML('<foreignObject width="100" height="100"></foreignObject>'))
+
+# Svg auto-adds xmlns
+assert_equal(Svg(Circle(r="10")), HTML('<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"></circle></svg>'))
+# Svg: explicit xmlns overrides default
+assert_equal(Svg(xmlns="http://www.w3.org/2000/svg"), HTML('<svg xmlns="http://www.w3.org/2000/svg"></svg>'))
+
+print("SVG namespace tests passed! ✓")
