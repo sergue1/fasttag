@@ -1085,7 +1085,7 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
         }
     }
 
-    if (!strcmp(tag, "pre")) {
+    if (!strcmp(tag, "pre") || !strcmp(tag, "textarea")) {
         disable_indent = 1;
     }
 
