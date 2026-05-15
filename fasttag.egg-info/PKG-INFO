@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: fasttag
-Version: 0.1.8
+Version: 0.1.9
 Summary: Extremely fast HTML tag generator
 Home-page: https://github.com/adamritter/fasttag
 Author: Adam Ritter
@@ -55,19 +55,10 @@ Div( # HTML Tags are exported in fasttag, but fasttag.tag("div", ...) can be use
 
 ```HTML
 <div hx-target="this" hx-swap="outerHTML">
-<div>
-    <label>First Name</label>
-    : Joe
-</div>
-<div>
-    <label>Last Name</label>
-    : Blow
-</div>
-<div>
-    <label>Email</label>
-    : joe@blow.com
-</div>
-<button hx-get="/contact/1/edit" class="btn primary">Click To Edit</button>
+    <div><label>First Name</label>: Joe</div>
+    <div><label>Last Name</label>: Blow</div>
+    <div><label>Email</label>: joe@blow.com</div>
+    <button hx-get="/contact/1/edit" class="btn primary">Click To Edit</button>
 </div>
 ```
 
