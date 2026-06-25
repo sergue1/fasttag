@@ -38,6 +38,12 @@ assert_equal(Div(["a", 2]), HTML("<div>['a', 2]</div>"))
 assert_equal(Div(a=[1,2]), HTML('<div a="[1, 2]"></div>'))
 assert_equal(Div(None, cls="small"), HTML('<div class="small"></div>'))
 assert_equal(Div(a=["'",'"']), HTML('''<div a="[&quot;'&quot;, '&quot;']"></div>'''))
+# Iterators (generators, map, filter) expand inline like *args.
+assert_equal(Span(x for x in ('a','b')), Span('a','b'))
+assert_equal(Span(map(str, [1,2,3])), Span('1','2','3'))
+assert_equal(Span('x', (s for s in 'ab'), 'y'), Span('x','a','b','y'))
+assert_equal(Span(x for x in ()), Span())
+assert_equal(Span(cls='c')(x for x in ('a','b')), Span('a','b', cls='c'))
 assert_equal(fasthtml.common.to_xml(fasthtml.common.Div(fasthtml.common.Span("hello"))), '<div>\n<span>hello</span></div>\n')
 assert_equal(Div("value", a="b", ccc="d", and2="tom&jerry").attrs,
              {"a": "b", "ccc": "d", "and2": "tom&jerry"})

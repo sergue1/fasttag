@@ -4,7 +4,7 @@ module = Extension('fasttag._fasttag', sources=['fasttag/fasttag.c'])
 
 setup(
     name='fasttag',
-    version='0.1.9',
+    version='0.2.0',
     description='Extremely fast HTML tag generator',
     packages=['fasttag'],
     ext_modules=[module],

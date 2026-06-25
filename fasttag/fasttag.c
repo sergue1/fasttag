@@ -805,6 +805,78 @@ static void classify_child_item(PyObject* item, int* has_text_child, int* has_ma
 // Forward declaration
 static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_first, PyObject* kwargs);
 
+// Expand any top-level iterators (generators, map, filter, ...) in args
+// inline, so Tag(x for x in ('a','b')) behaves like Tag('a','b'). Iterables
+// that aren't iterators (lists, dicts, sets, range) are left alone to
+// preserve existing behavior (rendered via PyObject_Str).
+//
+// Returns a new owned tuple reference. If no expansion is needed, returns
+// the original args with its refcount incremented (caller always DECREFs).
+static PyObject* materialize_iterators(PyObject* args) {
+    Py_ssize_t n = PyTuple_Size(args);
+
+    int has_iter = 0;
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (PyIter_Check(PyTuple_GetItem(args, i))) {
+            has_iter = 1;
+            break;
+        }
+    }
+    if (!has_iter) {
+        Py_INCREF(args);
+        return args;
+    }
+
+    PyObject** pieces = (PyObject**)PyMem_Calloc(n > 0 ? n : 1, sizeof(PyObject*));
+    if (!pieces) {
+        return PyErr_NoMemory();
+    }
+
+    Py_ssize_t total = 0;
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject* item = PyTuple_GetItem(args, i);
+        if (PyIter_Check(item)) {
+            PyObject* m = PySequence_Tuple(item);
+            if (!m) {
+                for (Py_ssize_t j = 0; j < i; j++) Py_XDECREF(pieces[j]);
+                PyMem_Free(pieces);
+                return NULL;
+            }
+            pieces[i] = m;
+            total += PyTuple_Size(m);
+        } else {
+            total += 1;
+        }
+    }
+
+    PyObject* new_args = PyTuple_New(total);
+    if (!new_args) {
+        for (Py_ssize_t i = 0; i < n; i++) Py_XDECREF(pieces[i]);
+        PyMem_Free(pieces);
+        return NULL;
+    }
+
+    Py_ssize_t out_idx = 0;
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (pieces[i]) {
+            Py_ssize_t k = PyTuple_Size(pieces[i]);
+            for (Py_ssize_t j = 0; j < k; j++) {
+                PyObject* sub = PyTuple_GetItem(pieces[i], j);
+                Py_INCREF(sub);
+                PyTuple_SET_ITEM(new_args, out_idx++, sub);
+            }
+            Py_DECREF(pieces[i]);
+        } else {
+            PyObject* item = PyTuple_GetItem(args, i);
+            Py_INCREF(item);
+            PyTuple_SET_ITEM(new_args, out_idx++, item);
+        }
+    }
+
+    PyMem_Free(pieces);
+    return new_args;
+}
+
 // Implement __call__ for HTML objects (for partial tags)
 static PyObject* HTML_call(PyObject* self, PyObject* args, PyObject* kwargs) {
     HTMLObject* html_obj = (HTMLObject*)self;
@@ -1045,6 +1117,16 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
     
     result[l++] = '>';
 
+    // Expand top-level iterators (generators, map, filter, ...) inline.
+    // Must happen before classify_child_item and the render loop, which
+    // both pass over args.
+    PyObject* materialized_args = materialize_iterators(args);
+    if (!materialized_args) {
+        return NULL;
+    }
+    args = materialized_args;
+    num_args = PyTuple_Size(args);
+
     // Determine whether to disable indentation for children
     char disable_indent = 0;
 
@@ -1108,6 +1190,7 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
         }
         append_item_to_html(&l, item, indent, disable_indent, disable_escaping, i, &result_obj, &reserved, &result);
         if (!result_obj) {
+            Py_DECREF(materialized_args);
             return NULL;
         }
     }
@@ -1131,6 +1214,7 @@ static PyObject* fasttag_tag_impl(const char* tag, PyObject* args, char skip_fir
     result_obj->kwargs = NULL;
     result_obj = HTMLObjectShrink(result_obj, l);
 
+    Py_DECREF(materialized_args);
     return (PyObject *)result_obj;
 }
 
